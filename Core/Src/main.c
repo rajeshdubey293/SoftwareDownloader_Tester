@@ -27,7 +27,9 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+#include <stdarg.h>
+#include <string.h>
+#include <stdint.h>
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -42,6 +44,7 @@
 /* Private variables ---------------------------------------------------------*/
 CRC_HandleTypeDef hcrc;
 
+UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
@@ -53,17 +56,24 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_CRC_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#define BL_DEBUG_MSG_EN
+#define D_UART &huart2
 
 uint8_t *dataArray = (uint8_t*)0x08008000;
-uint32_t uartData[3] = {0};
+uint32_t uartDataRx[3] = {0};
+uint32_t uartDataTx[3] = {0};
 uint32_t payloadLen = 0;
 uint32_t lenOfHexFile(void);
+uint32_t calculateAuthenticationKEY(uint32_t);
+static void printmsg(char *format,...);
+
 /* USER CODE END 0 */
 
 /**
@@ -96,6 +106,7 @@ int main(void)
   MX_GPIO_Init();
   MX_CRC_Init();
   MX_USART3_UART_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -107,35 +118,52 @@ int main(void)
     /* USER CODE BEGIN 3 */
   while(1)
   {
-
-  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
-  {
-
-	  uint8_t dataACK = 0;
-	  payloadLen = lenOfHexFile();
-	  uartData[0] = 0xAABBCCDD; // my seed and key
-	  uartData[1] = payloadLen + 4;
-	  uint32_t crc_Value = HAL_CRC_Calculate(&hcrc, dataArray, payloadLen);
-	  HAL_UART_Transmit(&huart3, &uartData, 8, HAL_MAX_DELAY);
-	  HAL_UART_Receive(&huart3, &dataACK, 4, HAL_MAX_DELAY);
-	  if(dataACK == 0xFFFFFFFF)
+	  printmsg("Press user Button to Program Device\r\n");
+	  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET)
 	  {
-		  uint8_t status = HAL_UART_Transmit(&huart3, dataArray, payloadLen, HAL_MAX_DELAY);
-		  if(status == HAL_OK)
+		  printmsg("Sending Connection Request\r\n");
+		  uint32_t temp = 0;
+		  HAL_UART_Transmit(&huart3, &temp,  4, HAL_MAX_DELAY);
+		  printmsg("Waiting for the Authentication Key\r\n");
+		  payloadLen = lenOfHexFile();
+		  HAL_UART_Receive(&huart3, &uartDataRx[0], 4, HAL_MAX_DELAY);
+		  uint32_t returnKEY = calculateAuthenticationKEY(uartDataRx[0]);
+		  printmsg("Authentication Key Received\r\n");
+		  uartDataTx[0] = returnKEY;
+		  HAL_Delay(1000);
+		  HAL_UART_Transmit(&huart3, &uartDataTx[0], 4, HAL_MAX_DELAY);
+		  printmsg("Waiting for the reply from Downloader\r\n");
+		  HAL_UART_Receive(&huart3, &uartDataRx[1], 4, HAL_MAX_DELAY);
+		  if(uartDataRx[1] == 0xFFFFFFFF)
 		  {
-			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
-			  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
+			  printmsg("Tester is Successfully Verified\r\n");
+			  uint32_t crc_Value = HAL_CRC_Calculate(&hcrc, dataArray, payloadLen);
+			  uartDataTx[1] = crc_Value;
+			  uartDataTx[2] = payloadLen;
+			  printmsg("Sending CRC Value and Payload Length\r\n");
+			  HAL_Delay(1000);
+			  HAL_UART_Transmit(&huart3, &uartDataTx[1], 8, HAL_MAX_DELAY);
+			  printmsg("Sending Payload\r\n");
+			  HAL_Delay(1000);
+			  uint8_t status = HAL_UART_Transmit(&huart3, dataArray, payloadLen, HAL_MAX_DELAY);
+			  if(status == HAL_OK)
+			  {
+				  printmsg("Sending is successfully\r\n");
+				  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);
+				  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
+			  }
+			  else
+			  {
+				  printmsg("Sending is failed\r\n");
+				  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
+				  HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+			  }
 		  }
-	  else
-	  {
-		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);
-		HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
 	  }
-	  }
-}
+  }
   /* USER CODE END 3 */
 }
-}
+
 /**
   * @brief System Clock Configuration
   * @retval None
@@ -202,6 +230,39 @@ static void MX_CRC_Init(void)
   /* USER CODE BEGIN CRC_Init 2 */
 
   /* USER CODE END CRC_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -284,6 +345,25 @@ uint32_t lenOfHexFile(void)
 	}
 	return (len * 4);
 }
+uint32_t calculateAuthenticationKEY(uint32_t key)
+{
+	uint32_t returnValue = key ^ 0xAABBCCDD;
+	return returnValue;
+
+}
+void printmsg(char *format,...)
+{
+#ifdef BL_DEBUG_MSG_EN
+	char str[80];
+	/*Extract the the argument list using VA apis */
+	va_list args;
+	va_start(args, format);
+	vsprintf(str, format,args);
+	HAL_UART_Transmit(D_UART,(uint8_t *)str, strlen(str),HAL_MAX_DELAY);
+	va_end(args);
+#endif
+}
+
 /* USER CODE END 4 */
 
 /**

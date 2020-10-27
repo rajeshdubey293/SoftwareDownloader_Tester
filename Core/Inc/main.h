@@ -37,7 +37,7 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
+#define D_UART &uart1
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
